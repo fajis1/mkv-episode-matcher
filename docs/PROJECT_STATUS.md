@@ -4489,14 +4489,61 @@ for review rather than forcing a TV identity.
   media, delete user media, organize a library, or eject a drive.
 ### Media Triage / Loose File Ingestion (2026-09-01)
 
-- We are currently developing the "Media Triage" feature to ingest unstructured, loose media files (e.g. from G:\Videos) directly into the pipeline (identify -> 	ranscode -> organize).
+- We are currently developing the "Media Triage" feature to ingest unstructured, loose media files (e.g. from G:\Videos) directly into the pipeline (identify -> transcode -> organize).
 - **Configuration:** A new media_triage_folder property has been added to EnvironmentSettings and .env.example.
 - **Note on Workspace:** Active agent development for this feature is occurring in the test branch, despite this branch having been merged into main on GitHub. All handovers and UI modifications must take place here.
 - **Next steps:** Build mkv_episode_matcher/backend/routers/triage.py to scan the configured directory, classify files as requiring matching or encoding, and present them to the frontend.
 
+### Automatic Season-First Triage & Non-Disc Recovery (2026-09-04)
+
+- **Fingerprint-Free Source Identity**: `SourceIdentity` and `source_identity()`
+  in `mkv_episode_matcher/backend/identification_dossier.py` support loose/triage
+  items without optical disc context. Items without a physical `disc_fingerprint`
+  are keyed by `media_id`, exact file size, modification timestamp, and ASR
+  model. The system never fabricates or synthesizes a 16-hex disc fingerprint for
+  non-disc media.
+- **Pipeline Adapter Media Matching**: `IdentifyStageAdapter` in
+  `mkv_episode_matcher/pipeline_adapters.py` matches `episode_assignments` on
+  `entry.get("media_id") == item.media_id` when `title_index` is absent, allowing
+  arbitrary non-disc items to advance through the identify stage without ordinal
+  disc title indices.
+- **Season-First Gemini Recovery Workflow**:
+  `execute_unmatched_season_analysis()` in
+  `mkv_episode_matcher/backend/unmatched_disc_analysis.py`:
+  - Resolves canonical series details through TMDb.
+  - Trusts the enclosing season folder context (e.g., `Season 01`) and limits
+    initial candidate evaluation strictly to that season's episode catalogue.
+  - Collects ASR audio excerpts using Faster Whisper.
+  - Calls `GeminiEpisodeRanker` in two passes (`gemini-initial` and
+    `gemini-confirmation`). A match requires agreement between passes, high
+    confidence (>= 0.70 default), and runtime consistency against the catalogue.
+  - **All-Season Fallback**: If within-season analysis fails to find a confident
+    match, it falls back to the full series catalogue as a last resort.
+  - Re-enqueues resolved items into the pipeline with verified rip contracts
+    bearing `GEMINI_TWO_PASS_SOURCE` assignments and identification policy
+    version 4.
+- **Automatic Downstream Recovery**:
+  - `_automatic_season_tv_context()` and `_resolve_automatic_unmatched_season()`
+    in `mkv_episode_matcher/backend/automatic_rip.py` safely isolate non-disc TV
+    items under `_downstream_lock`.
+  - `DownstreamWorker._apply_automatic_triage_analysis()` in
+    `mkv_episode_matcher/backend/downstream_worker.py` periodically discovers
+    non-disc TV items stuck in `review_required: episode_match_review` and
+    triggers automated recovery.
+- **Tests & Verification**:
+  - Comprehensive unit suite in `tests/test_triage_season_analysis.py` covers
+    source identity, adapter assignment resolution, season context extraction,
+    two-pass Gemini matching, all-season fallback, and worker automation (all
+    passing).
+  - Live pipeline verification on `triage-d8166ac22151914f`
+    (`EUREKA 1.3_t07.mkv`) successfully transcribed audio via Faster Whisper,
+    called Gemini, resolved the title to S01E06 ("Dr. Nobel") with 1.0 confidence,
+    identified the contract, and routed it to `organize: library_collision` upon
+    detecting an existing transcode, preserving existing destination files.
 
 ## Future Feature: Advanced Home Video Identification (Media Triage)
 - The current Media Triage scanner excludes files starting with PXL_ (Google Pixel format) as personal home movies.
 - **Future Need:** PXL_ is not the only format for home videos (e.g., iPhones use IMG_, GoPros use GOPR, generic cameras use DSC_ or MVI_, and many have datestamps like YYYYMMDD_HHMMSS).
 - We must develop more robust heuristics (regex patterns, metadata extraction like missing audio tracks or specific encoder tags, or lack of standard media naming) to identify home videos.
 - **Future Pipeline:** These identified home videos need their own separate processing pipeline, potentially using an LLM (Gemini summary naming) for automatic description/tagging, as they cannot be matched against TV/Movie databases.
+
