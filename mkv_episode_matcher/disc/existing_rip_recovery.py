@@ -151,17 +151,6 @@ def _failed_batch_cohorts(  # noqa: C901 - linear identity and prefix guards
         ordinal = int(match.group("ordinal"))
         parent_match = re.fullmatch(r"title-(\d{3})", path.parent.name)
         first_title_index = int(parent_match.group(1)) if parent_match else None
-        largest_possible_ordinal = len(ordered) - 1
-        if (
-            first_title_index is not None
-            and first_title_index != ordered[0].title_index
-        ):
-            largest_possible_ordinal = max(
-                largest_possible_ordinal,
-                max(job.title_index for job in ordered) - first_title_index,
-            )
-        if ordinal > largest_possible_ordinal:
-            continue
         key = (path.parent.resolve(), match.group("prefix"))
         if ordinal in grouped.setdefault(key, {}):
             grouped[key].pop(ordinal, None)
