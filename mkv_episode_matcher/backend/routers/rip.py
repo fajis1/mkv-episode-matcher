@@ -1654,7 +1654,9 @@ def _auto_admit_staged_disc_if_complete(  # noqa: C901 - auto-admit verification
         return None
     staged_plan = discover_existing_rips(output_root, manifest_jobs)
     if not staged_plan.candidates:
-        return None
+        raise RipError(
+            f"Auto-admit failed: NO CANDIDATES FOUND. output_root={output_root} manifest_jobs={[j.job_id for j in manifest_jobs]}"
+        )
     required_title_indexes = (
         recovery_scope
         if recovery_scope
@@ -1674,10 +1676,14 @@ def _auto_admit_staged_disc_if_complete(  # noqa: C901 - auto-admit verification
         library_title_indexes | skipped_title_indexes | safely_present_title_indexes
     )
     if not needed_title_indexes:
-        return None
+        raise RipError(
+            f"Auto-admit failed: NO NEEDED TITLES. required={required_title_indexes} library={library_title_indexes} skipped={skipped_title_indexes} safely={safely_present_title_indexes}"
+        )
     candidate_by_title = {c.title_index: c for c in staged_plan.candidates}
     if not needed_title_indexes <= set(candidate_by_title):
-        return None
+        raise RipError(
+            f"Auto-admit failed: needed {needed_title_indexes} but found {set(candidate_by_title)}"
+        )
     selected_candidates = tuple(
         candidate_by_title[title_index] for title_index in sorted(needed_title_indexes)
     )
@@ -1709,7 +1715,9 @@ def _auto_admit_staged_disc_if_complete(  # noqa: C901 - auto-admit verification
         except (FFprobeError, OSError):
             valid = False
         if not valid:
-            return None
+            raise RipError(
+                f"Auto-admit failed: ffprobe failed for {candidate.basename}"
+            )
         verified_jobs.append(job)
         verified_candidates.append(candidate)
         results.append(
@@ -1724,7 +1732,9 @@ def _auto_admit_staged_disc_if_complete(  # noqa: C901 - auto-admit verification
             )
         )
     if len(verified_jobs) != len(needed_title_indexes):
-        return None
+        raise RipError(
+            f"Auto-admit failed: len(verified_jobs) {len(verified_jobs)} != {len(needed_title_indexes)}"
+        )
     contract_root.mkdir(parents=True, exist_ok=True)
     enqueue_verified_rip_results(
         pipeline_store,
